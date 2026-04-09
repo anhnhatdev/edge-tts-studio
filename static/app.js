@@ -78,7 +78,7 @@ function setupTextCounter() {
 const quickTexts = {
   hello: "Hello there! My name is Jenny and I'm powered by Microsoft's neural text-to-speech technology. It's completely free to use and sounds incredibly natural!",
   news: "Good morning! Here are today's top headlines: Scientists have made a groundbreaking discovery in renewable energy, claiming it could power entire cities with minimal environmental impact. In other news, the global economy shows signs of steady recovery as technology sectors continue to lead growth.",
-  story: "Once upon a time, in a small village nestled between mist-covered mountains, there lived a young inventor named Clara. Every morning, she would wake before dawn, her mind already buzzing with ideas. One rainy autumn day, she discovered a peculiar blueprint hidden beneath the floorboards of her grandfather's workshop — and everything changed."
+  story: "Once upon a time, in a small village nestled between mist-covered mountains, there lived a young inventor named Clara. Every morning, she would wake before dawn, her mind already buzzing with ideas. One rainy autumn day, she discovered a blueprint hidden beneath the floorboards of her grandfather's workshop — and everything changed."
 };
 function setQuickText(key) {
   document.getElementById("textInput").value = quickTexts[key];

@@ -1,17 +1,20 @@
 """
 Edge TTS Web App - FastAPI Backend
-Free Microsoft Neural TTS with beautiful UI
+Free Microsoft Neural TTS + Local Transcription
 """
 
 import asyncio
 import os
 import tempfile
 import uuid
+import shutil
 from pathlib import Path
 
 import aiofiles
 import edge_tts
-from fastapi import FastAPI, HTTPException
+import whisper
+import torch
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,8 +36,23 @@ STATIC_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR = Path(__file__).parent / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
+UPLOAD_DIR = Path(__file__).parent / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/outputs", StaticFiles(directory=str(OUTPUT_DIR)), name="outputs")
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+
+# Lazy load whisper model
+whisper_model = None
+
+def get_whisper():
+    global whisper_model
+    if whisper_model is None:
+        print("📥 Loading Whisper 'tiny' model (resource-efficient)...")
+        # Use CPU by default to save VRAM/resources
+        whisper_model = whisper.load_model("tiny", device="cpu")
+    return whisper_model
 
 
 # ─── Models ───────────────────────────────────────────────────────────────────
@@ -52,6 +70,12 @@ class SynthRequest(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 async def root():
     html_file = Path(__file__).parent / "index.html"
+    return HTMLResponse(content=html_file.read_text(encoding="utf-8"))
+
+
+@app.get("/transcribe", response_class=HTMLResponse)
+async def transcribe_page():
+    html_file = Path(__file__).parent / "transcribe.html"
     return HTMLResponse(content=html_file.read_text(encoding="utf-8"))
 
 
@@ -116,6 +140,31 @@ async def cleanup(file_id: str):
     if path.exists():
         path.unlink()
     return {"deleted": True}
+
+
+@app.post("/api/transcribe")
+async def api_transcribe(file: UploadFile = File(...)):
+    """Upload audio and transcribe it."""
+    file_id = uuid.uuid4().hex[:12]
+    ext = Path(file.filename).suffix or ".mp3"
+    temp_file = UPLOAD_DIR / f"{file_id}{ext}"
+
+    try:
+        with temp_file.open("wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Run transcription
+        model = get_whisper()
+        result = model.transcribe(str(temp_file))
+        
+        return {
+            "text": result["text"],
+            "url": f"/uploads/{temp_file.name}",
+            "language": result.get("language", "en"),
+        }
+    except Exception as e:
+        if temp_file.exists(): temp_file.unlink()
+        raise HTTPException(500, f"Transcription failed: {str(e)}")
 
 
 if __name__ == "__main__":
