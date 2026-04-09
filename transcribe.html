@@ -1,54 +1,47 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Edge Transcriber — Local Speech to Text</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/style.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Transcriber - Edge TTS Studio</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
 </head>
 <body>
-  <div class="bg-orbs">
-    <div class="orb orb-1"></div>
-    <div class="orb orb-2"></div>
-    <div class="orb orb-3"></div>
+  <div class="background-blobs">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
   </div>
 
   <div class="container">
+    <nav class="nav">
+      <a href="/" class="nav-link">TTS Studio</a>
+      <a href="/transcribe" class="nav-link active">Transcriber</a>
+    </nav>
+
     <header class="header">
-      <div class="logo">
-        <div class="logo-icon" style="background: linear-gradient(135deg, var(--accent), var(--accent-2))">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-          </svg>
-        </div>
-        <div>
-          <h1 class="logo-title">Edge Transcriber</h1>
-          <p class="logo-sub">Local AI Speech-to-Text · Privacy Focused</p>
-        </div>
-      </div>
-      <nav class="nav">
-        <a href="/" class="nav-link">TTS Studio</a>
-        <a href="/transcribe" class="nav-link active">Transcriber</a>
-      </nav>
+      <h1 class="glow-text">Edge Transcriber</h1>
+      <p class="subtitle">Convert audio to text locally & privately</p>
     </header>
 
-    <main class="main-grid">
-      <!-- Left Panel: Upload -->
-      <section class="card input-panel">
-        <div class="card-header">
-          <h2 class="card-title">📤 Upload Audio</h2>
+    <div class="main-grid" style="grid-template-columns: 1fr;">
+      <!-- Left Panel: Upload & Controls -->
+      <div class="glass-card">
+        <div class="section-title">
+          <span class="icon">📁</span>
+          <h2>Upload Audio</h2>
         </div>
 
-        <div class="upload-zone" id="uploadZone">
-          <input type="file" id="fileInput" accept="audio/*" hidden />
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-          </svg>
-          <p>Drag & drop or <span>browse</span></p>
-          <span class="file-info" id="fileName">No file selected</span>
+        <div class="upload-zone" id="dropZone" onclick="document.getElementById('audioFile').click()">
+          <input type="file" id="audioFile" accept="audio/*" hidden onchange="handleFileSelect(event)">
+          <div class="upload-content">
+            <span class="upload-icon">🎵</span>
+            <p id="fileNameDisplay">Click or drag audio file here</p>
+            <span class="file-info">MP3, WAV, M4A supported</span>
+          </div>
         </div>
 
         <button id="transcribeBtn" class="btn-generate" style="background: linear-gradient(135deg, var(--accent), var(--accent-2))" onclick="uploadAndTranscribe()">
@@ -56,56 +49,65 @@
           <span id="btnText">Start Transcription</span>
         </button>
 
+        <!-- Progress Overlay -->
+        <div id="progressOverlay" class="progress-overlay" style="display:none">
+          <div class="progress-info">
+            <span id="progressMessage">Analyzing audio...</span>
+            <span id="timeRemaining">Est. --s left</span>
+          </div>
+          <div class="progress-track">
+            <div id="progressBar" class="progress-fill"></div>
+          </div>
+        </div>
+
         <div class="info-note">
           <p>⚠️ Transcription uses Whisper Tiny (CPU). Large files may take a few moments.</p>
         </div>
-      </section>
+      </div>
 
-      <!-- Right Panel: Player & Result -->
-      <section class="right-panel">
-        <!-- Player Card -->
-        <div class="card player-card">
-          <div class="card-header">
-            <h2 class="card-title">🎵 Player Controls</h2>
-          </div>
+      <!-- Result Panel -->
+      <div class="glass-card result-panel">
+        <div class="section-title">
+          <span class="icon">📝</span>
+          <h2>Transcript & Player</h2>
+        </div>
 
-          <audio id="audioPlayer" controls style="display:none"></audio>
-          <div id="playerPlaceholder" class="player-placeholder">
-            Upload audio to start
-          </div>
+        <div id="playerPlaceholder" class="player-placeholder">
+          Upload and transcribe an audio file to see results
+        </div>
 
-          <div class="custom-controls" id="customControls" style="display:none">
-            <div class="control-row">
-              <button class="btn-ctrl" onclick="skip(-5)">-5s</button>
-              <button class="btn-ctrl" onclick="togglePlay()" id="playBtn">Play</button>
-              <button class="btn-ctrl" onclick="skip(5)">+5s</button>
+        <div id="customControls" class="transcribe-controls" style="display:none">
+          <audio id="audioPlayer" controls style="width: 100%; display: none;"></audio>
+          
+          <div class="playback-actions">
+            <button class="btn-tool" onclick="seek(-5)">⏪ -5s</button>
+            <div class="speed-selector">
+              <span>Speed:</span>
+              <select id="speedRate" onchange="changeSpeed(this.value)">
+                <option value="0.5">0.5x</option>
+                <option value="0.75">0.75x</option>
+                <option value="1" selected>1.0x</option>
+                <option value="1.25">1.25x</option>
+                <option value="1.5">1.5x</option>
+                <option value="2">2.0x</option>
+              </select>
             </div>
-            
-            <div class="slider-group">
-              <div class="slider-row">
-                <label>Playback Speed</label>
-                <span class="slider-val" id="speedVal">1.0x</span>
-              </div>
-              <input type="range" id="speedSlider" class="slider" min="0.5" max="2" step="0.1" value="1" oninput="updateSpeed(this.value)" />
-            </div>
+            <button class="btn-tool" onclick="seek(5)">+5s ⏩</button>
           </div>
         </div>
 
-        <!-- Transcript Card -->
-        <div class="card transcript-card">
-          <div class="card-header">
-            <h2 class="card-title">📝 Transcript</h2>
-            <button class="btn-action btn-copy" onclick="copyTranscript()">Copy</button>
+        <div class="transcript-box">
+          <div class="transcript-header">
+            <span>Result</span>
+            <button class="btn-copy" onclick="copyTranscript()">Copy to Clipboard</button>
           </div>
-          <div id="transcriptArea" class="transcript-area">
-            Transcript will appear here...
-          </div>
+          <div id="transcriptArea" class="transcript-content"></div>
         </div>
-      </section>
-    </main>
+      </div>
+    </div>
   </div>
 
-  <div class="toast" id="toast"></div>
+  <div id="toast" class="toast"></div>
 
   <script src="/static/transcribe.js"></script>
 </body>

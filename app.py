@@ -1,26 +1,26 @@
 """
 Edge TTS Web App - FastAPI Backend
-Free Microsoft Neural TTS + Local Transcription (Chunked)
+Free Microsoft Neural TTS + Local Transcription (Chunked + Progress)
 """
 
 import asyncio
 import os
-import tempfile
 import uuid
 import shutil
-from pathlib import Path
-
-import aiofiles
-import edge_tts
 import whisper
 import torch
-from fastapi import FastAPI, HTTPException, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+import time
+import json
+from pathlib import Path
 from pydub import AudioSegment
 import imageio_ffmpeg as ff
+
+from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+import edge_tts
 
 # Robustly set ffmpeg paths for pydub to avoid "ffmpeg not found" on Windows
 ffmpeg_path = ff.get_ffmpeg_exe()
@@ -154,53 +154,81 @@ async def cleanup(file_id: str):
 
 @app.post("/api/transcribe")
 async def api_transcribe(file: UploadFile = File(...)):
-    """Upload audio, split into chunks, and transcribe."""
+    """Upload audio, split into chunks, and transcribe with progress updates."""
     file_id = uuid.uuid4().hex[:12]
     ext = Path(file.filename).suffix.lower() or ".mp3"
     temp_file = UPLOAD_DIR / f"{file_id}{ext}"
 
-    try:
-        # 1. Save uploaded file
-        with temp_file.open("wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
-        # 2. Load audio and split into chunks to save resources/avoid errors
-        print(f"📦 Processing {temp_file}...")
-        audio = AudioSegment.from_file(str(temp_file))
-        duration_ms = len(audio)
-        chunk_length_ms = 30000  # 30 seconds
-        
-        chunks = []
-        for i in range(0, duration_ms, chunk_length_ms):
-            chunks.append(audio[i : i + chunk_length_ms])
-        
-        print(f"✂️  Split into {len(chunks)} chunks.")
-        
-        # 3. Transcribe chunks
-        model = get_whisper()
-        full_transcript = []
-        
-        for idx, chunk in enumerate(chunks):
-            chunk_path = UPLOAD_DIR / f"{file_id}_chunk_{idx}.wav"
-            chunk.export(str(chunk_path), format="wav")
+    async def generate_progress():
+        try:
+            # 1. Save uploaded file
+            with temp_file.open("wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
             
-            print(f"🎙️  Transcribing chunk {idx+1}/{len(chunks)}...")
-            result = model.transcribe(str(chunk_path), fp16=False)
-            full_transcript.append(result["text"].strip())
+            yield json.dumps({"status": "processing", "message": "Analyzing audio..."}) + "\n"
             
-            # Clean up chunk
-            if chunk_path.exists(): chunk_path.unlink()
-        
-        return {
-            "text": " ".join(full_transcript),
-            "url": f"/uploads/{temp_file.name}",
-            "duration": duration_ms / 1000,
-            "chunks": len(chunks)
-        }
-    except Exception as e:
-        if temp_file.exists(): temp_file.unlink()
-        print(f"❌ Error in transcription: {str(e)}")
-        raise HTTPException(500, f"Transcription failed: {str(e)}")
+            # 2. Load audio and split into chunks
+            audio = AudioSegment.from_file(str(temp_file))
+            duration_ms = len(audio)
+            chunk_length_ms = 30000  # 30 seconds
+            chunks = []
+            for i in range(0, duration_ms, chunk_length_ms):
+                chunks.append(audio[i : i + chunk_length_ms])
+            
+            total_chunks = len(chunks)
+            yield json.dumps({
+                "status": "processing", 
+                "message": f"Split into {total_chunks} segments",
+                "total_chunks": total_chunks
+            }) + "\n"
+            
+            # 3. Transcribe chunks
+            model = get_whisper()
+            full_transcript = []
+            start_time = time.time()
+            
+            for idx, chunk in enumerate(chunks):
+                chunk_idx = idx + 1
+                chunk_path = UPLOAD_DIR / f"{file_id}_chunk_{idx}.wav"
+                chunk.export(str(chunk_path), format="wav")
+                
+                # Estimate remaining time based on previous chunks
+                elapsed = time.time() - start_time
+                avg_time_per_chunk = elapsed / chunk_idx if idx > 0 else 5.0 # assume 5s for first
+                remaining_est = avg_time_per_chunk * (total_chunks - chunk_idx)
+                
+                yield json.dumps({
+                    "status": "progress",
+                    "current": chunk_idx,
+                    "total": total_chunks,
+                    "remaining": round(remaining_est, 1),
+                    "message": f"Transcribing part {chunk_idx}/{total_chunks}..."
+                }) + "\n"
+                
+                # Run transcription (force CPU and FP32 for Windows/stability)
+                result = model.transcribe(str(chunk_path), fp16=False)
+                full_transcript.append(result["text"].strip())
+                
+                # Close file handle and clean up chunk
+                if chunk_path.exists():
+                    try:
+                        chunk_path.unlink()
+                    except: pass # Ignore if still locked, will clean later
+            
+            yield json.dumps({
+                "status": "complete",
+                "text": " ".join(full_transcript),
+                "url": f"/uploads/{temp_file.name}",
+                "duration": duration_ms / 1000
+            }) + "\n"
+
+        except Exception as e:
+            if temp_file.exists(): 
+                try: temp_file.unlink()
+                except: pass
+            yield json.dumps({"status": "error", "message": str(e)}) + "\n"
+
+    return StreamingResponse(generate_progress(), media_type="application/x-ndjson")
 
 
 if __name__ == "__main__":
