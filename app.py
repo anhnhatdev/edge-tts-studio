@@ -1,6 +1,6 @@
 """
 Edge TTS Web App - FastAPI Backend
-Free Microsoft Neural TTS + Local Transcription
+Free Microsoft Neural TTS + Local Transcription (Chunked)
 """
 
 import asyncio
@@ -19,6 +19,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from pydub import AudioSegment
+import imageio_ffmpeg as ff
+
+# Robustly set ffmpeg paths for pydub to avoid "ffmpeg not found" on Windows
+ffmpeg_path = ff.get_ffmpeg_exe()
+AudioSegment.converter = ffmpeg_path
+AudioSegment.ffmpeg = ffmpeg_path
+ffprobe_path = os.path.join(os.path.dirname(ffmpeg_path), "ffprobe.exe")
+if os.path.exists(ffprobe_path):
+    AudioSegment.ffprobe = ffprobe_path
 
 app = FastAPI(title="Edge TTS Studio")
 
@@ -144,26 +154,52 @@ async def cleanup(file_id: str):
 
 @app.post("/api/transcribe")
 async def api_transcribe(file: UploadFile = File(...)):
-    """Upload audio and transcribe it."""
+    """Upload audio, split into chunks, and transcribe."""
     file_id = uuid.uuid4().hex[:12]
-    ext = Path(file.filename).suffix or ".mp3"
+    ext = Path(file.filename).suffix.lower() or ".mp3"
     temp_file = UPLOAD_DIR / f"{file_id}{ext}"
 
     try:
+        # 1. Save uploaded file
         with temp_file.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        # Run transcription
+        # 2. Load audio and split into chunks to save resources/avoid errors
+        print(f"📦 Processing {temp_file}...")
+        audio = AudioSegment.from_file(str(temp_file))
+        duration_ms = len(audio)
+        chunk_length_ms = 30000  # 30 seconds
+        
+        chunks = []
+        for i in range(0, duration_ms, chunk_length_ms):
+            chunks.append(audio[i : i + chunk_length_ms])
+        
+        print(f"✂️  Split into {len(chunks)} chunks.")
+        
+        # 3. Transcribe chunks
         model = get_whisper()
-        result = model.transcribe(str(temp_file))
+        full_transcript = []
+        
+        for idx, chunk in enumerate(chunks):
+            chunk_path = UPLOAD_DIR / f"{file_id}_chunk_{idx}.wav"
+            chunk.export(str(chunk_path), format="wav")
+            
+            print(f"🎙️  Transcribing chunk {idx+1}/{len(chunks)}...")
+            result = model.transcribe(str(chunk_path), fp16=False)
+            full_transcript.append(result["text"].strip())
+            
+            # Clean up chunk
+            if chunk_path.exists(): chunk_path.unlink()
         
         return {
-            "text": result["text"],
+            "text": " ".join(full_transcript),
             "url": f"/uploads/{temp_file.name}",
-            "language": result.get("language", "en"),
+            "duration": duration_ms / 1000,
+            "chunks": len(chunks)
         }
     except Exception as e:
         if temp_file.exists(): temp_file.unlink()
+        print(f"❌ Error in transcription: {str(e)}")
         raise HTTPException(500, f"Transcription failed: {str(e)}")
 
 

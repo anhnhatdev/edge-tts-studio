@@ -4,3 +4,5 @@ edge-tts
 python-multipart
 aiofiles
 openai-whisper
+pydub
+imageio-ffmpeg
